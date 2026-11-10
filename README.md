@@ -70,10 +70,22 @@ allowlisted hosts are ever fetched.
 ### Native install (Jellyfin LXC / VM)
 
 ```sh
-sudo sh deploy/install.sh          # Node 22 + app in /opt/dlhd-bridge + systemd unit
+git clone https://github.com/woody-willis/dlhd-bridge /tmp/dlhd-bridge
+sudo sh /tmp/dlhd-bridge/deploy/install.sh
+```
+
+That installs a standalone Node 22 runtime in `/opt/node22`, clones this
+repository to `/opt/dlhd-bridge`, installs `dlhd-bridge.service` and starts it.
+Updates are the same script, or just:
+
+```sh
+sudo dlhd-bridge-update      # git pull --ff-only + restart, only if HEAD moved
 systemctl status dlhd-bridge
 curl -s http://127.0.0.1:8080/healthz
 ```
+
+The service runs the checkout directly, so `git log -1` in `/opt/dlhd-bridge` is
+always the version that is live.
 
 The unit binds `HOST=127.0.0.1`, so only Jellyfin on the same machine can reach
 it — Jellyfin fetches the HLS itself and re-serves it to clients. Hardening is
