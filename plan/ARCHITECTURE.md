@@ -153,6 +153,7 @@ dead id cannot generate upstream load or log spam:
 
 ## Env
 ```
+HOST=0.0.0.0          # bind address; use 127.0.0.1 when Jellyfin is local
 PORT=8080
 BASE_URL=            # optional; used to build absolute playlist URLs (default: from request Host)
 CATALOG_REFRESH_MIN=10

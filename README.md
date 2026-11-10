@@ -56,10 +56,35 @@ Nothing is stored on disk; resolution is lazy and TTL-cached.
 ```
 
 Everything Jellyfin needs is on one origin. Upstream URLs are never exposed to the
-client: playlist URIs are rewritten to `/seg/<id>/<base64url>`, and only
+client: playlist URIs are rewritten to `/seg/<id>/<base64url><ext>`, and only
 allowlisted hosts are ever fetched.
 
-## Quick start
+## Choose where it runs
+
+| Setup | Best when | Notes |
+| --- | --- | --- |
+| **Native systemd, same host as Jellyfin** (recommended) | Jellyfin runs on a small LXC/VM | ~28 MB RSS, no Docker, binds `127.0.0.1` so no new open port |
+| Docker Compose on any always-on box | You already run Docker | 160 MB image, needs the box to stay awake |
+| Docker inside an unprivileged LXC | — | needs `features: nesting=1` on the Proxmox host; more fragile than native |
+
+### Native install (Jellyfin LXC / VM)
+
+```sh
+sudo sh deploy/install.sh          # Node 22 + app in /opt/dlhd-bridge + systemd unit
+systemctl status dlhd-bridge
+curl -s http://127.0.0.1:8080/healthz
+```
+
+The unit binds `HOST=127.0.0.1`, so only Jellyfin on the same machine can reach
+it — Jellyfin fetches the HLS itself and re-serves it to clients. Hardening is
+equivalent to the container's `read_only` + `tmpfs` model (`ProtectSystem=strict`,
+`DynamicUser`, `PrivateTmp`); the app writes nothing to disk. Re-run the same
+script to deploy a new build.
+
+Point Jellyfin at `http://127.0.0.1:8080/playlist.m3u` and
+`http://127.0.0.1:8080/xmltv.xml`.
+
+## Quick start (Docker)
 
 ```sh
 docker compose up -d --build
@@ -149,6 +174,7 @@ descriptive error.
 | Variable              | Default               | Meaning                                                                                                                                                                                          |
 | --------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `PORT`                | `8080`                | HTTP listen port inside the container.                                                                                                                                                           |
+| `HOST`                | `0.0.0.0`             | Interface to bind. Set `127.0.0.1` when Jellyfin runs on the same host and nothing else needs to reach the bridge. |
 | `BASE_URL`            | _(empty)_             | Public origin used to build absolute links in the playlist and `x-tvg-url`, e.g. `http://192.168.1.10:8080`. When empty, the request `Host` header (sanitised) and `X-Forwarded-Proto` are used. |
 | `CATALOG_REFRESH_MIN` | `10`                  | Minutes between catalogue scrapes (1–1440). Failed refreshes keep the previous snapshot.                                                                                                         |
 | `EVENT_WINDOW_MIN`    | `120`                 | Default look-ahead window in minutes for `mode=live` (0–10080).                                                                                                                                  |

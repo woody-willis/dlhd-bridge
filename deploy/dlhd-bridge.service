@@ -1,0 +1,45 @@
+[Unit]
+Description=DLHD -> Jellyfin bridge (M3U + XMLTV + HLS proxy)
+Documentation=file:/opt/dlhd-bridge/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Runs as an ephemeral system user; the app writes nothing to disk.
+DynamicUser=yes
+ExecStart=/opt/node22/bin/node /opt/dlhd-bridge/src/index.js
+WorkingDirectory=/opt/dlhd-bridge
+
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=8080
+Environment=TZ=UTC
+Environment=LOG_LEVEL=info
+Environment=CATALOG_REFRESH_MIN=10
+
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+KillSignal=SIGTERM
+
+# Hardening: equivalent to the container's read_only + tmpfs model.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+MemoryMax=512M
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target
