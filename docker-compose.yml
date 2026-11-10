@@ -1,0 +1,51 @@
+# dlhd-bridge — Jellyfin M3U + XMLTV bridge.
+#
+#   docker compose up -d --build
+#   ./scripts/smoke.sh
+#
+# All values below are the application defaults. Override them in a .env file
+# next to this file or in your shell (e.g. CATALOG_REFRESH_MIN=5).
+# The healthcheck is inherited from the image (Dockerfile HEALTHCHECK).
+
+services:
+  dlhd-bridge:
+    build: .
+    image: dlhd-bridge:latest
+    container_name: dlhd-bridge
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    environment:
+      # Port inside the container (must match the mapping above).
+      PORT: "8080"
+      # Optional public origin for absolute playlist links. Empty = derive from
+      # the request Host header, which is what Jellyfin normally wants.
+      BASE_URL: "${BASE_URL:-}"
+      # Catalogue scrape interval, minutes (Jellyfin guide refresh should be >= this).
+      CATALOG_REFRESH_MIN: "${CATALOG_REFRESH_MIN:-10}"
+      # `mode=live` look-ahead window, minutes.
+      EVENT_WINDOW_MIN: "${EVENT_WINDOW_MIN:-120}"
+      # How long a resolved upstream stream URL is reused, seconds.
+      RESOLVE_TTL_SEC: "${RESOLVE_TTL_SEC:-600}"
+      # Upstream HTTP timeout, milliseconds.
+      UPSTREAM_TIMEOUT_MS: "${UPSTREAM_TIMEOUT_MS:-15000}"
+      # Override only if the upstream starts rejecting the built-in browser UA.
+      # USER_AGENT: "Mozilla/5.0 ..."
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      TZ: "${TZ:-UTC}"
+    # The app never writes to disk; everything is in memory. /tmp is a small
+    # writable tmpfs for Node/npm-adjacent runtime needs.
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Graceful shutdown drains for up to 5s (see src/index.js).
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

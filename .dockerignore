@@ -1,0 +1,20 @@
+# Build context hygiene: only package manifests + src/ are needed.
+.git
+.gitignore
+node_modules
+npm-debug.log*
+.env
+.env.*
+.DS_Store
+
+# Tests, docs and reverse-engineering artifacts are not part of the runtime.
+test
+scripts
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+*.md
+channels-24-7.json
+events.json
+dlhd-token.mjs

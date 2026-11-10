@@ -1,0 +1,16 @@
+{
+  "name": "jf-sports-streams",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DLHD (thedaddy.li) -> Jellyfin M3U + XMLTV bridge with HLS proxying",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.mjs",
+    "test:dir": "node --test test/",
+    "test:offline": "OFFLINE=1 node --test test/*.mjs"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "nowMs": 1800000000000,
+  "channels": [
+    { "id": 61, "name": "beIN Sports MENA English 1", "group": "B" },
+    { "id": 51, "name": "ABC USA", "group": "A" },
+    { "id": 811, "name": "SEE Denmark", "group": "S" }
+  ],
+  "events": [
+    {
+      "id": 337,
+      "title": "Team A & Team <B>",
+      "category": "All Soccer ⚽",
+      "startMs": 1799998200000,
+      "endMs": 1800009000000,
+      "channelIds": [32, 33],
+      "channelNames": ["tennis stream", "extra stream"]
+    },
+    {
+      "id": 338,
+      "title": "Future Cup Final O'Reilly",
+      "category": "Tennis & Racket 🎾",
+      "startMs": 1800018000000,
+      "endMs": 1800028800000,
+      "channelIds": [61],
+      "channelNames": ["beIN Sports MENA English 1"]
+    }
+  ]
+}
