@@ -351,6 +351,33 @@ the feature. Other regional rippers from the same service are optional:
 | Portugal | `epg_ripper_PT1.xml.gz` |
 | Sweden | `epg_ripper_SE1.xml.gz` |
 
+Measured coverage against the live catalogue (879 channels) on 2026-11-13:
+
+| Sources | Channels with real guide data | Programmes | Peak RSS |
+| --- | --- | --- | --- |
+| UK1 (default) | 45 | 5 167 | ~145 MB |
+| + IE1, US2, CA2 | 119 | 12 382 | ~230 MB |
+| + AU1, DE1 | 153 | 16 548 | ~190 MB |
+| + FR1, IT1 (8 total) | 208 | 21 058 | ~300 MB |
+
+A broader set costs real memory, so raise the unit's cap accordingly, e.g. as a
+drop-in on the native install:
+
+```ini
+# /etc/systemd/system/dlhd-bridge.service.d/epg.conf
+[Service]
+Environment=EPG_SOURCES=https://epgshare01.online/epgshare01/epg_ripper_UK1.xml.gz,https://epgshare01.online/epgshare01/epg_ripper_IE1.xml.gz,https://epgshare01.online/epgshare01/epg_ripper_US2.xml.gz,https://epgshare01.online/epgshare01/epg_ripper_CA2.xml.gz,https://epgshare01.online/epgshare01/epg_ripper_AU1.xml.gz,https://epgshare01.online/epgshare01/epg_ripper_DE1.xml.gz,https://epgshare01.online/epgshare01/epg_ripper_FR1.xml.gz,https://epgshare01.online/epgshare01/epg_ripper_IT1.xml.gz
+MemoryMax=768M
+```
+
+```sh
+sudo systemctl daemon-reload && sudo systemctl restart dlhd-bridge
+curl -s http://127.0.0.1:8080/healthz   # epg: {matched, programmes, sources, ageMs}
+```
+
+With Docker, set the same `EPG_SOURCES` in `docker-compose.yml` and give the
+container `mem_limit: 768m`.
+
 Example:
 
 ```sh
