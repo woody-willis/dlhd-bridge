@@ -12,6 +12,40 @@ import { fetchText } from '../http.js';
 import * as log from '../log.js';
 import { parseChannels, parseEvents } from './scrape.js';
 
+/**
+ * Adult / 18+ detection. Deliberately narrow: it must catch the site's
+ * "18+ (Player-01..20)" block without touching ordinary channels such as
+ * "Adult Swim". EXCLUDE_ADULT=0 turns the filter off entirely.
+ */
+const ADULT_PATTERNS = Object.freeze([
+  /\b18\s*\+/i,
+  /\bxxx\b/i,
+  /\badult\b(?!\s*swim)/i,
+  /\bplayboy\b/i,
+  /\bhustler\b/i,
+  /\bpenthouse\b/i,
+  /\bbrazzers\b/i,
+  /\bdorcel\b/i,
+  /\breality\s*kings\b/i,
+  /\bevil\s*angel\b/i,
+  /\bxmo\b/i,
+  /\bvivid\b/i,
+  /\berotic\b/i,
+  /\bbarely\s*legal\b/i,
+  /\bexxotica\b/i,
+  /\bredlight\b/i,
+]);
+
+/**
+ * @param {unknown} value channel name or event title
+ * @returns {boolean}
+ */
+export function isAdultText(value) {
+  const text = String(value ?? '');
+  if (!text) return false;
+  return ADULT_PATTERNS.some((re) => re.test(text));
+}
+
 /** @typedef {{channels:Array,events:Array,fetchedAt:number,errors:Array,stats:Object}} Snapshot */
 
 /** @type {Snapshot} */
@@ -26,6 +60,8 @@ const snapshot = {
     channelInvalid: 0,
     eventBlocks: 0,
     eventSkipped: 0,
+    channelAdult: 0,
+    eventAdult: 0,
   },
 };
 
@@ -95,6 +131,8 @@ async function doRefresh() {
     channelInvalid: 0,
     eventBlocks: 0,
     eventSkipped: 0,
+    channelAdult: 0,
+    eventAdult: 0,
   };
 
   const [channelsResult, eventsResult] = results;
@@ -107,12 +145,20 @@ async function doRefresh() {
       const scrapeStats = parsed.stats ?? {};
       stats.channelCards = scrapeStats.parsed ?? parsed.length;
       const unique = dedupeChannels(parsed, stats);
-      snapshot.channels = unique;
+      const visible = config.excludeAdult
+        ? unique.filter((channel) => {
+            if (!isAdultText(channel.name)) return true;
+            stats.channelAdult++;
+            return false;
+          })
+        : unique;
+      snapshot.channels = visible;
       channelsOk = true;
       log.info('catalogue: channels refreshed', {
         cards: stats.channelCards,
         unique: unique.length,
         duplicates: stats.channelDuplicates,
+        adultFiltered: stats.channelAdult,
       });
     } catch (err) {
       errors.push(recordError('channels', err));
@@ -130,12 +176,20 @@ async function doRefresh() {
       stats.eventBlocks = scrapeStats.blocks ?? parsed.length;
       stats.eventSkipped = scrapeStats.skipped ?? 0;
       const events = normaliseEvents(parsed);
-      snapshot.events = events;
+      const visibleEvents = config.excludeAdult
+        ? events.filter((event) => {
+            if (!isAdultText(event.title)) return true;
+            stats.eventAdult++;
+            return false;
+          })
+        : events;
+      snapshot.events = visibleEvents;
       eventsOk = true;
       log.info('catalogue: events refreshed', {
         blocks: stats.eventBlocks,
-        kept: events.length,
+        kept: visibleEvents.length,
         skipped: stats.eventSkipped,
+        adultFiltered: stats.eventAdult,
       });
     } catch (err) {
       errors.push(recordError('events', err));

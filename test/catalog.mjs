@@ -12,10 +12,29 @@ import {
   getChannels,
   getEvents,
   getStats,
+  isAdultText,
   refreshNow,
 } from '../src/catalog/index.js';
 
 const OFFLINE = process.env.OFFLINE === '1';
+
+test('catalogue: adult/18+ detection is narrow and off by default', () => {
+  for (const name of ['18+ (Player-01)', '18+', 'XXX', 'Playboy TV', 'Hustler HD', 'Adult']) {
+    assert.equal(isAdultText(name), true, `${name} should be filtered`);
+  }
+  // Ordinary channels must survive, especially the "Adult Swim" network.
+  for (const name of [
+    'Adult Swim',
+    'Sky Sports Football UK',
+    'beIN Sports MENA English 1',
+    'Red Bull TV',
+    'U18+ Football',
+    'E! Entertainment',
+    '',
+  ]) {
+    assert.equal(isAdultText(name), false, `${name} must not be filtered`);
+  }
+});
 const YEAR_2026_START = Date.UTC(2026, 0, 1);
 const YEAR_2026_END = Date.UTC(2027, 0, 1);
 
@@ -39,6 +58,10 @@ test('catalogue: channels and events scraped from the live site', { skip: OFFLIN
     channels.every((channel) => typeof channel.name === 'string' && channel.name.trim().length > 0),
     'every channel must have a non-empty name',
   );
+  assert.ok(
+    channels.every((channel) => !isAdultText(channel.name)),
+    'adult / 18+ channels must be filtered out of the catalogue by default',
+  );
   const uniqueIds = new Set(channels.map((channel) => channel.id));
   assert.equal(uniqueIds.size, channels.length, 'channel ids must be de-duplicated');
   assert.ok(
@@ -47,6 +70,10 @@ test('catalogue: channels and events scraped from the live site', { skip: OFFLIN
   );
 
   const events = getEvents();
+  assert.ok(
+    events.every((event) => !isAdultText(event.title)),
+    'adult / 18+ events must be filtered out of the catalogue by default',
+  );
   assert.ok(events.length >= 50, `expected at least 50 events, got ${events.length}`);
   assert.ok(
     events.every((event) => Number.isFinite(event.startMs)),
@@ -85,7 +112,8 @@ test('catalogue: channels and events scraped from the live site', { skip: OFFLIN
   assert.ok(getStats().stats.eventBlocks >= events.length);
 
   console.log(
-    `catalogue live: ${channels.length} channels (${stats.stats.channelDuplicates} dupes), ` +
-      `${events.length} events, ${stats.stats.eventSkipped} skipped`,
+    `catalogue live: ${channels.length} channels (${stats.stats.channelDuplicates} dupes, ` +
+      `${stats.stats.channelAdult} adult filtered), ${events.length} events, ` +
+      `${stats.stats.eventSkipped} skipped`,
   );
 });

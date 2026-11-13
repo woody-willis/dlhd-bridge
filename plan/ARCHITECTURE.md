@@ -158,6 +158,7 @@ PORT=8080
 BASE_URL=            # optional; used to build absolute playlist URLs (default: from request Host)
 CATALOG_REFRESH_MIN=10
 EVENT_WINDOW_MIN=120
+EXCLUDE_ADULT=1       # drop 18+/adult channels from playlist + XMLTV
 RESOLVE_TTL_SEC=600
 UPSTREAM_TIMEOUT_MS=15000
 USER_AGENT=Mozilla/5.0 (…Chrome/131…)

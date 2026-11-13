@@ -43,6 +43,15 @@ function readString(name, fallback) {
   return trimmed === '' ? fallback : trimmed;
 }
 
+function readBool(name, fallback) {
+  const raw = readString(name, '');
+  if (raw === '') return fallback;
+  const value = raw.toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(value)) return true;
+  if (['0', 'false', 'no', 'off'].includes(value)) return false;
+  throw new Error(`Invalid ${name}: expected a boolean, got ${JSON.stringify(raw)}`);
+}
+
 function readBaseUrl() {
   const raw = readString('BASE_URL', '');
   if (!raw) return '';
@@ -74,6 +83,7 @@ export const config = Object.freeze({
   baseUrl: readBaseUrl(),
   catalogRefreshMin: readInt('CATALOG_REFRESH_MIN', 10, { min: 1, max: 1440 }),
   eventWindowMin: readInt('EVENT_WINDOW_MIN', 120, { min: 0, max: 10080 }),
+  excludeAdult: readBool('EXCLUDE_ADULT', true),
   resolveTtlSec: readInt('RESOLVE_TTL_SEC', 600, { min: 1, max: 86400 }),
   upstreamTimeoutMs: readInt('UPSTREAM_TIMEOUT_MS', 15000, { min: 100, max: 120000 }),
   userAgent: readString('USER_AGENT', DEFAULT_USER_AGENT),

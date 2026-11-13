@@ -34,6 +34,17 @@ const UNSUPPORTED_MS = 60 * 60_000;
 let unplayableRevision = 0;
 let lastUnplayableKey = '';
 
+/**
+ * Rolling window of recent resolution outcomes (true = success). When every
+ * attempt in the window fails, the whole provider is down/rotated rather than
+ * a handful of ids being unsupported — in that case hiding ids would quietly
+ * empty the playlist, so the filter is suspended instead.
+ */
+const RECENT_OUTCOMES = 12;
+const OUTAGE_WINDOW = 5;
+const recentOutcomes = [];
+let outageLogged = false;
+
 const counters = {
   hits: 0,
   misses: 0,
@@ -45,6 +56,17 @@ const counters = {
 
 function ttlMs() {
   return config.resolveTtlSec * 1000;
+}
+
+function noteOutcome(ok) {
+  recentOutcomes.push(ok);
+  if (recentOutcomes.length > RECENT_OUTCOMES) recentOutcomes.shift();
+}
+
+/** @returns {boolean} true when the last OUTAGE_WINDOW attempts all failed. */
+function providerOutage() {
+  if (recentOutcomes.length < OUTAGE_WINDOW) return false;
+  return recentOutcomes.slice(-OUTAGE_WINDOW).every((ok) => ok === false);
 }
 
 function noteProvider(provider) {
@@ -170,11 +192,13 @@ export async function resolve(id) {
       cache.set(key, { value: result, expiresAt: Date.now() + ttlMs() });
       failures.delete(key);
       counters.resolved++;
+      noteOutcome(true);
       noteProvider(result.provider);
       return result;
     })
     .catch((err) => {
       counters.failed++;
+      noteOutcome(false);
       recordFailure(key, err);
       throw err;
     })
@@ -200,6 +224,14 @@ export function invalidate(id) {
  * @returns {string[]} sorted ids
  */
 export function unplayableIds() {
+  if (providerOutage()) {
+    if (!outageLogged) {
+      outageLogged = true;
+      log.warn('provider: every recent resolve failed, suspending the unplayable filter');
+    }
+    return [];
+  }
+  outageLogged = false;
   const now = Date.now();
   const ids = [];
   for (const [key, failure] of failures) {
