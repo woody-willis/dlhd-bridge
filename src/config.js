@@ -52,6 +52,32 @@ function readBool(name, fallback) {
   throw new Error(`Invalid ${name}: expected a boolean, got ${JSON.stringify(raw)}`);
 }
 
+/**
+ * EPG_SOURCES: comma/space separated URLs. `none`/`off` disables the feature.
+ * The default is one public UK XMLTV file from epgshare01.online.
+ */
+function readEpgSources() {
+  const defaultUrl = 'https://epgshare01.online/epgshare01/epg_ripper_UK1.xml.gz';
+  const raw = readString('EPG_SOURCES', defaultUrl);
+  if (/^(none|off)$/i.test(raw)) return Object.freeze([]);
+  const urls = raw
+    .split(/[\s,]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  for (const value of urls) {
+    let parsed;
+    try {
+      parsed = new URL(value);
+    } catch {
+      throw new Error(`Invalid EPG_SOURCES: ${JSON.stringify(value)} is not a valid URL`);
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`Invalid EPG_SOURCES: expected http(s), got ${parsed.protocol}`);
+    }
+  }
+  return Object.freeze(urls);
+}
+
 function readBaseUrl() {
   const raw = readString('BASE_URL', '');
   if (!raw) return '';
@@ -86,6 +112,9 @@ export const config = Object.freeze({
   excludeAdult: readBool('EXCLUDE_ADULT', true),
   resolveTtlSec: readInt('RESOLVE_TTL_SEC', 600, { min: 1, max: 86400 }),
   upstreamTimeoutMs: readInt('UPSTREAM_TIMEOUT_MS', 15000, { min: 100, max: 120000 }),
+  epgSources: readEpgSources(),
+  epgRefreshMin: readInt('EPG_REFRESH_MIN', 360, { min: 15, max: 10080 }),
+  epgMaxBytes: readInt('EPG_MAX_BYTES', 83886080, { min: 1048576, max: 536870912 }),
   userAgent: readString('USER_AGENT', DEFAULT_USER_AGENT),
   logLevel: readLogLevel(),
   site: SITE,

@@ -29,6 +29,10 @@ src/
   config.js          env parsing, constants
   log.js             tiny levelled logger
   http.js            fetch wrapper: UA, timeout, retry, Referer injection
+  epg/
+    index.js         external XMLTV guide: refresh loop, getGuide(), getStats(), epgRevision()
+    parse.js         tolerant XMLTV parser (regex-based, gzip handled in index)
+    match.js         exact-key EPG↔catalogue channel matching
   catalog/
     index.js         exports getChannels(), getEvents(), startCatalogRefresh()
     scrape.js        HTML extraction (regex-based, tolerant)
@@ -141,6 +145,8 @@ dead id cannot generate upstream load or log spam:
 
 ## Caching & refresh
 - Catalogue: refresh every `CATALOG_REFRESH_MIN` (default 10) with stale-on-error.
+- External EPG: refresh every `EPG_REFRESH_MIN` (default 360) with stale-on-error;
+  one source at a time, raw XML dropped before the next fetch.
 - Resolved stream: TTL from `resolve().ttlMs`, default 10 min, single-flight per id.
 - Playlist response: `Cache-Control: public, max-age=30`.
 - XMLTV: `Cache-Control: public, max-age=300`.
@@ -148,11 +154,17 @@ dead id cannot generate upstream load or log spam:
 ## XMLTV
 - One `<channel>` per catalogue entry (channels + event items), ids matching the
   playlist `tvg-id`.
-- For 24/7 channels: emit one `<programme>` per 6h block covering now..+24h with the
-  channel name as `<title>` (`<desc>` says "24/7 channel").
+- External guide (`src/epg/`): programmes for matched channels replace the 24/7
+  blocks, clamped to `[now-6h, now+7d]`, sorted and de-duplicated by start time.
+  `<title>`, `<desc>`, `<category>`, `<episode-num>` and `<icon>` come from the
+  source (`<icon src=""/>` when absent).
+- For 24/7 channels with no guide entry: emit one `<programme>` per 6h block
+  covering now..+24h with the channel name as `<title>` (`<desc>` says "24/7
+  channel").
 - For events: one `<programme start=… stop=…>` using the schedule's start/end,
   `<title>` = event title, `<category>` = category.
 - Times in `YYYYMMDDHHMMSS +0000`. XML-escape everything.
+- Programme cap: 30000 (override `maxProgrammes`; `X-Programmes-Truncated: 1`).
 
 ## Env
 ```
@@ -164,6 +176,10 @@ EVENT_WINDOW_MIN=120
 EXCLUDE_ADULT=1       # drop 18+/adult channels from playlist + XMLTV
 RESOLVE_TTL_SEC=600
 UPSTREAM_TIMEOUT_MS=15000
+EPG_SOURCES=https://epgshare01.online/epgshare01/epg_ripper_UK1.xml.gz
+                      # comma/space separated XMLTV URLs; `none`/`off` disables
+EPG_REFRESH_MIN=360   # 15..10080
+EPG_MAX_BYTES=83886080 # max decompressed bytes per source (1 MiB..512 MiB)
 USER_AGENT=Mozilla/5.0 (…Chrome/131…)
 TZ=UTC
 LOG_LEVEL=info

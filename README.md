@@ -107,7 +107,8 @@ Open <http://127.0.0.1:8080/> for a status page, or
 <http://127.0.0.1:8080/healthz> for JSON:
 
 ```json
-{ "ok": true, "channels": 899, "events": 329, "resolved": 0, "uptime": 12 }
+{ "ok": true, "channels": 899, "events": 329, "resolved": 0, "uptime": 12,
+  "epg": { "matched": 45, "programmes": 5167, "sources": 1, "ageMs": 42000 } }
 ```
 
 `ok:true` means the first catalogue scrape has completed, not merely that the
@@ -153,7 +154,7 @@ Notes:
 | Route              | Method    | Description                                                                                      |
 | ------------------ | --------- | ------------------------------------------------------------------------------------------------ |
 | `/`                | GET, HEAD | Small HTML status page: counts, uptime, catalogue age, endpoint list.                            |
-| `/healthz`         | GET, HEAD | JSON `{ok, channels, events, resolved, uptime}`. `ok` is true after the first successful scrape. |
+| `/healthz`         | GET, HEAD | JSON `{ok, channels, events, resolved, uptime, epg}`. `ok` is true after the first successful scrape. |
 | `/playlist.m3u`    | GET, HEAD | M3U playlist. Alias: `/playlist.m3u8`. ETag + `max-age=30`.                                      |
 | `/xmltv.xml`       | GET, HEAD | XMLTV 0.1 guide. Alias: `/epg.xml`. ETag + `max-age=300`.                                        |
 | `/stream/:id.m3u8` | GET       | Resolves and rewrites one channel's HLS playlist.                                                |
@@ -193,6 +194,9 @@ descriptive error.
 | `EVENT_WINDOW_MIN`    | `120`                 | Default look-ahead window in minutes for `mode=live` (0–10080).                                                                                                                                  |
 | `RESOLVE_TTL_SEC`     | `600`                 | Seconds a resolved upstream `stream_url` is reused before resolving again (1–86400).                                                                                                             |
 | `UPSTREAM_TIMEOUT_MS` | `15000`               | Per-request upstream timeout in milliseconds (100–120000).                                                                                                                                       |
+| `EPG_SOURCES`         | epgshare01 UK1        | Comma/space separated third-party XMLTV URLs (plain or `.xml.gz`). `none` (or `off`) disables the external guide and keeps only the built-in 6h blocks.                                          |
+| `EPG_REFRESH_MIN`     | `360`                 | Minutes between external guide refreshes (15–10080). A failed refresh keeps the previous guide.                                                                                                   |
+| `EPG_MAX_BYTES`       | `83886080`            | Maximum decompressed guide size per source, in bytes (1 MiB–512 MiB). Larger bodies are rejected with an error instead of buffered.                                                              |
 | `USER_AGENT`          | Chrome 133 desktop UA | User-Agent sent to the site and providers. Override only if the upstream starts rejecting the default.                                                                                           |
 | `LOG_LEVEL`           | `info`                | `debug`, `info`, `warn` or `error`. Query strings are always redacted from logs.                                                                                                                 |
 | `TZ`                  | `UTC`                 | Container timezone. Generated XMLTV times are always UTC; `TZ` does not change them.                                                                                                             |
@@ -284,12 +288,80 @@ from the list rather than showing as dead entries.
 ### Guide
 
 `/xmltv.xml` emits one `<channel>` per catalogue entry with ids matching the
-playlist `tvg-id`. 24/7 channels get four 6-hour `<programme>` blocks covering the
-next 24 hours; events get one programme from their scheduled start time. Every
-channel referenced by an event also gets a channel entry, even if it has no 24/7
-mapping. The generator caps output at 5000 programmes (adds header
+playlist `tvg-id`. When external guide data is available for a channel, its real
+programmes replace the built-in blocks; otherwise the channel keeps four 6-hour
+`<programme>` blocks covering the next 24 hours (title = channel name,
+description "24/7 channel"). Events get one programme from their scheduled start
+time. Every channel referenced by an event also gets a channel entry, even if it
+has no 24/7 mapping. The generator caps output at 30000 programmes (adds header
 `X-Programmes-Truncated: 1` if hit) and skips events that ended more than 6 hours
 ago.
+
+### Better guide data (external EPG)
+
+The bridge can enrich the guide from a public XMLTV source. On load it:
+
+1. downloads each source (gzip is handled in-process, one source at a time),
+2. matches the source's channels onto the catalogue by **exact normalised name**
+   (`SkySp Fball HD` → `Sky Sports Football UK`), including abbreviation
+   expansion (`sp` → `sports`, `fball` → `football`, `ev` → `event`, …) and
+   country-code disambiguation from the XMLTV id suffix (`.uk`, `.de`, …),
+3. keeps only programmes for matched channels, clamped to `[now-6h, now+7d]`,
+   and drops duplicate start times.
+
+Each source is parsed in two passes over the decompressed bytes (channels, then
+programmes), and the decompressed document plus per-source arrays are released
+before the next source is fetched, so a multi-source refresh stays at roughly
+one source in memory at a time.
+
+A wrong match is worse than no guide, so matching is deliberately strict: no
+fuzzy or Levenshtein matching, and a cross-country collision is skipped unless
+our channel name (or a `.xx` id suffix) disambiguates it. Duplicate feeds of the
+same channel under different XMLTV ids are collapsed onto one.
+
+Matched channels use the source `<title>`, `<desc>`, `<category>`,
+`<episode-num>` and icon; **unmatched channels keep the 24/7 filler blocks** and
+the existing playlist `tvg-id`s never change. If every source fails, the previous
+guide is kept and `/healthz` reports `epg.sources`/`epg.ageMs`; the bridge always
+serves a guide.
+
+The default source is:
+
+```
+https://epgshare01.online/epgshare01/epg_ripper_UK1.xml.gz
+```
+
+`EPG_SOURCES` accepts several comma/space separated URLs (they are loaded in
+order and the first guide entry for a channel wins), or `none`/`off` to disable
+the feature. Other regional rippers from the same service are optional:
+
+| Region | File |
+| --- | --- |
+| United Kingdom | `epg_ripper_UK1.xml.gz` |
+| Ireland | `epg_ripper_IE1.xml.gz` |
+| United States | `epg_ripper_US2.xml.gz` |
+| Canada | `epg_ripper_CA2.xml.gz` |
+| Australia | `epg_ripper_AU1.xml.gz` |
+| Germany | `epg_ripper_DE1.xml.gz` |
+| France | `epg_ripper_FR1.xml.gz` |
+| Spain | `epg_ripper_ES1.xml.gz` |
+| Italy | `epg_ripper_IT1.xml.gz` |
+| Netherlands | `epg_ripper_NL1.xml.gz` |
+| Poland | `epg_ripper_PL1.xml.gz` |
+| Portugal | `epg_ripper_PT1.xml.gz` |
+| Sweden | `epg_ripper_SE1.xml.gz` |
+
+Example:
+
+```sh
+EPG_SOURCES="https://epgshare01.online/epgshare01/epg_ripper_UK1.xml.gz,https://epgshare01.online/epgshare01/epg_ripper_DE1.xml.gz"
+EPG_REFRESH_MIN=360
+```
+
+This is a **third-party service**: files can change name, disappear, be
+rate-limited or carry wrong data. The bridge treats it as best-effort enrichment
+and never makes startup or the playlist depend on it. Guide icons are emitted as
+`<icon src="…"/>` in the XMLTV; Jellyfin fetches them directly from the source.
 
 ## Reliability and limitations
 
@@ -333,8 +405,8 @@ ago.
 ## Development
 
 ```sh
-npm test              # 16 tests; live tests hit the real site (skip with OFFLINE=1)
-npm run test:offline  # pure unit tests only
+npm test              # 22 tests; live tests hit the real site + EPG source (skip with OFFLINE=1)
+npm run test:offline  # pure unit tests only (17 tests, 5 skipped)
 ./scripts/dev.sh      # node --watch src/index.js with LOG_LEVEL=debug
 ./scripts/smoke.sh    # end-to-end checks against BASE_URL (default :8080)
 ```

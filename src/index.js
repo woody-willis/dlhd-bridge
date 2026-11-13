@@ -6,6 +6,7 @@
 import { config } from './config.js';
 import * as log from './log.js';
 import { startCatalogRefresh } from './catalog/index.js';
+import { startEpgRefresh } from './epg/index.js';
 import { createServer } from './server/index.js';
 
 const DRAIN_MS = 5000;
@@ -60,6 +61,14 @@ startCatalogRefresh()
       channels: stats.channels,
       events: stats.events,
       errors: stats.errors.length,
+    });
+    // Fire-and-forget: the guide is an enrichment, the bridge serves without it.
+    return startEpgRefresh().then((guide) => {
+      log.info('epg: initial refresh finished', {
+        matched: guide.matched,
+        programmes: guide.programmes,
+        errors: guide.errors.length,
+      });
     });
   })
   .catch((err) => {

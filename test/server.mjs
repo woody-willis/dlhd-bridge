@@ -304,6 +304,15 @@ test('http server: routes, ETags and live HLS proxy', { skip: OFFLINE ? 'OFFLINE
     for (const key of ['channels', 'events', 'resolved', 'uptime']) {
       assert.equal(typeof json[key], 'number', `${key} should be a number`);
     }
+    assert.equal(typeof json.epg, 'object');
+    for (const key of ['matched', 'programmes', 'sources']) {
+      assert.equal(typeof json.epg[key], 'number', `epg.${key} should be a number`);
+    }
+    assert.ok(json.epg.ageMs === null || typeof json.epg.ageMs === 'number');
+    assert.ok(
+      !JSON.stringify(json.epg).includes('http'),
+      'healthz must never expose EPG source URLs',
+    );
 
     const head = await request('/healthz', { method: 'HEAD' });
     assert.equal(head.status, 200);

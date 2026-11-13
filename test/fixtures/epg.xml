@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tv SYSTEM "xmltv.dtd">
+<tv generator-info-name="epgshare01" generator-info-url="https://epgshare01.online/">
+  <channel id="SkySp.Fball.uk">
+    <display-name lang="en">SkySp Fball</display-name>
+    <icon src="https://example.test/logos/skysportsfootball.png" />
+  </channel>
+  <channel id="SkySp.Fball.HD.uk">
+    <display-name lang="en">SkySp Fball HD</display-name>
+  </channel>
+  <channel id="SkySpMainEv.de">
+    <display-name lang="en">SkySpMainEv</display-name>
+    <icon src="https://example.test/logos/skysportsmainevent.png" />
+  </channel>
+  <channel id="Arena.Sport.1.hr">
+    <display-name lang="hr">Arena Sport 1</display-name>
+  </channel>
+
+  <programme start="20261113183000 +0000" stop="20261113190000 +0000" channel="SkySp.Fball.uk">
+    <title lang="en">Pre-Match &amp; Build-Up</title>
+    <desc lang="en">Team news and interviews.</desc>
+    <category lang="en">Sport</category>
+  </programme>
+  <programme start="20261113190000 +0000" stop="20261113200000 +0000" channel="SkySp.Fball.uk">
+    <title lang="en">Football &amp; More &lt;Live&gt;</title>
+    <desc lang="en">O&apos;Reilly &amp; co present the big match.</desc>
+    <category lang="en">Football</category>
+    <episode-num system="xmltv_ns">0.1/2</episode-num>
+    <icon src="https://example.test/logos/football-live.png" />
+  </programme>
+  <programme start="20261113200000 +0000" stop="20261113213000 +0000" channel="SkySp.Fball.uk">
+    <title lang="en">Post Match</title>
+    <desc lang="en">Reaction and analysis.</desc>
+  </programme>
+
+  <programme start="20261113210000 +0100" stop="20261113220000 +0100" channel="SkySpMainEv.de">
+    <title lang="de">Bundesliga Live</title>
+    <desc lang="de">Topspiel aus der Bundesliga.</desc>
+    <category lang="de">Fussball</category>
+  </programme>
+
+  <programme start="20261113190000 +0000" stop="20261113210000 +0000" channel="Arena.Sport.1.hr">
+    <title lang="hr">Croatian League</title>
+    <desc lang="hr">A Croatian fixture that must never land on the Serbian channel.</desc>
+  </programme>
+
+  <programme start="not-a-date" stop="20261113200000 +0000" channel="SkySp.Fball.uk">
+    <title lang="en">Broken Entry</title>
+  </programme>
+</tv>

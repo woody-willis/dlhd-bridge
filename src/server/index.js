@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto';
 import { config } from '../config.js';
 import * as log from '../log.js';
 import { getChannels, getEvents, getStats } from '../catalog/index.js';
+import { getGuide, getStats as epgStats, epgRevision } from '../epg/index.js';
 import {
   stats as providerStats,
   unplayableIds,
@@ -108,14 +109,19 @@ const ENDPOINTS = Object.freeze([
 function renderStatusPage() {
   const stats = getStats();
   const providers = providerStats();
+  const epg = epgStats();
   const uptime = formatUptime(process.uptime());
   const fetched = stats.fetchedAt ? new Date(stats.fetchedAt).toISOString() : 'never';
+  const epgFetched = epg.fetchedAt ? new Date(epg.fetchedAt).toISOString() : 'never';
   const rows = [
     ['Channels', stats.channels],
     ['Events', stats.events],
     ['Resolved streams', providers.resolved],
     ['Uptime', uptime],
     ['Catalogue fetched', fetched],
+    ['Guide programmes', epg.programmes],
+    ['Guide channels matched', epg.matched],
+    ['Guide fetched', epgFetched],
     ['Refresh errors', stats.errors.length],
   ]
     .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`)
@@ -211,6 +217,7 @@ async function handleStatus(res, head) {
 function handleHealth(res, head) {
   const stats = getStats();
   const providers = providerStats();
+  const epg = epgStats();
   sendJson(
     res,
     200,
@@ -220,6 +227,12 @@ function handleHealth(res, head) {
       events: stats.events,
       resolved: providers.resolved,
       uptime: Math.round(process.uptime()),
+      epg: {
+        matched: epg.matched,
+        programmes: epg.programmes,
+        sources: epg.sources,
+        ageMs: epg.ageMs,
+      },
     },
     {},
     head,
@@ -296,7 +309,8 @@ async function handleXmltv(req, res, head) {
   // channel that has no working stream entry.
   const deadIds = unplayableIds();
   const deadKey = unplayableKey();
-  const key = `xmltv:${stats.fetchedAt}:${deadKey}`;
+  const revision = epgRevision();
+  const key = `xmltv:${stats.fetchedAt}:${deadKey}:${revision}`;
 
   const generated = await cache.get(key, XMLTV_TTL_MS, () =>
     buildXmltv({
@@ -304,10 +318,11 @@ async function handleXmltv(req, res, head) {
       events: getEvents(),
       nowMs: Date.now(),
       excludeChannelIds: deadIds,
+      guide: getGuide(),
     }),
   );
 
-  const etag = weakEtag('xmltv', stats.fetchedAt, deadKey);
+  const etag = weakEtag('xmltv', stats.fetchedAt, deadKey, revision);
   const headers = {
     'Content-Type': generated.contentType,
     'Cache-Control': `public, max-age=${XMLTV_MAX_AGE}`,

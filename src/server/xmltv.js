@@ -7,7 +7,9 @@
 
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 const STALE_AFTER_MS = 6 * 60 * 60 * 1000;
-export const MAX_PROGRAMMES = 5000;
+const GUIDE_PAST_MS = 6 * 60 * 60 * 1000;
+const GUIDE_FUTURE_MS = 7 * 24 * 60 * 60 * 1000;
+export const MAX_PROGRAMMES = 30000;
 const CONTENT_TYPE = 'application/xml; charset=utf-8';
 
 const XML_ESCAPES = Object.freeze({
@@ -90,12 +92,65 @@ function validEvent(event) {
 }
 
 /**
+ * Guide programmes for one channel inside [now-6h, now+7d], clamped, sorted
+ * and de-duplicated by start time.
+ *
+ * @param {{programmes?:Array}|undefined} entry
+ * @param {number} now
+ * @returns {Array<object>}
+ */
+function guideWindow(entry, now) {
+  if (!entry || !Array.isArray(entry.programmes) || entry.programmes.length === 0) return [];
+  const from = now - GUIDE_PAST_MS;
+  const to = now + GUIDE_FUTURE_MS;
+  const out = [];
+  const seen = new Set();
+  for (const programme of entry.programmes) {
+    const startMs = Number(programme?.startMs);
+    const stopMs = Number(programme?.stopMs);
+    if (!Number.isFinite(startMs) || !Number.isFinite(stopMs) || stopMs <= startMs) continue;
+    if (stopMs <= from || startMs >= to) continue;
+    if (seen.has(startMs)) continue;
+    seen.add(startMs);
+    out.push({
+      ...programme,
+      startMs: Math.max(startMs, from),
+      stopMs: Math.min(stopMs, to),
+    });
+  }
+  out.sort((a, b) => a.startMs - b.startMs || a.stopMs - b.stopMs);
+  return out;
+}
+
+/** One `<programme>` line from an external guide entry. */
+function guideProgrammeXml(tvgId, programme, fallbackIcon) {
+  const parts = [
+    `  <programme start="${formatXmltvTime(programme.startMs)}" ` +
+      `stop="${formatXmltvTime(programme.stopMs)}" channel="${tvgId}">`,
+    `<title>${escapeXml(programme.title)}</title>`,
+  ];
+  if (programme.category) parts.push(`<category>${escapeXml(programme.category)}</category>`);
+  if (programme.desc) parts.push(`<desc>${escapeXml(programme.desc)}</desc>`);
+  if (programme.episode && programme.episode.value) {
+    const system = programme.episode.system
+      ? ` system="${escapeXml(programme.episode.system)}"`
+      : '';
+    parts.push(`<episode-num${system}>${escapeXml(programme.episode.value)}</episode-num>`);
+  }
+  const icon = programme.icon || fallbackIcon || '';
+  parts.push(`<icon src="${escapeXml(icon)}"/>`);
+  parts.push('</programme>');
+  return parts.join('');
+}
+
+/**
  * @param {{
  *   channels?: Array<{id:number,name:string,group:string}>,
  *   events?: Array<object>,
  *   nowMs?: number,
  *   maxProgrammes?: number,
  *   excludeChannelIds?: Array<number|string>,
+ *   guide?: {byChannelId?: Map<number, {programmes:Array, icon?:string, sourceChannelId:string}>},
  * }} [options]
  * @returns {{body:string, contentType:string, channels:number, programmes:number, truncated:boolean}}
  */
@@ -106,6 +161,7 @@ export function buildXmltv(options = {}) {
   const capRaw = Number(options.maxProgrammes);
   const cap =
     Number.isInteger(capRaw) && capRaw > 0 ? capRaw : MAX_PROGRAMMES;
+  const guideMap = options.guide?.byChannelId instanceof Map ? options.guide.byChannelId : null;
 
   const channelLines = [];
   const programmeLines = [];
@@ -141,11 +197,21 @@ export function buildXmltv(options = {}) {
     seenChannelIds.add(tvgId);
 
     const name = clean(channel.name) || `Channel ${id}`;
+    const guideEntry = guideMap ? guideMap.get(id) : undefined;
+    const external = guideWindow(guideEntry, now);
+    const iconSrc = external.length > 0 && guideEntry?.icon ? escapeXml(guideEntry.icon) : '';
     channelLines.push(
-      `  <channel id="${tvgId}"><display-name>${escapeXml(name)}</display-name><icon src=""/></channel>`,
+      `  <channel id="${tvgId}"><display-name>${escapeXml(name)}</display-name><icon src="${iconSrc}"/></channel>`,
     );
 
-    // 4 x 6h blocks starting at the current 6h boundary.
+    if (external.length > 0) {
+      for (const programme of external) {
+        addProgramme(guideProgrammeXml(tvgId, programme, guideEntry.icon));
+      }
+      continue;
+    }
+
+    // 4 x 6h blocks starting at the current 6h boundary (no guide data).
     for (let i = 0; i < 4; i++) {
       const start = blockStart + i * SIX_HOURS_MS;
       const stop = start + SIX_HOURS_MS;
