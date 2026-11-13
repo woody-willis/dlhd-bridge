@@ -67,7 +67,10 @@ README.md
 
 `resolve(id)` must:
 - fetch `https://thedaddy.li/cast/stream-<id>.php` (Referer `https://thedaddy.li/`),
-  extract the `<iframe src>` → `https://tossequip.net/e/<token>`,
+  and take the `/e/<token>` from the `<iframe src>`. The player host rotates
+  (`tossequip.net` → `waterera.net`), but the token is shared, so the token is
+  requested from the ungated mirror (`https://tossequip.net/e/<token>`) first and
+  from the embedded host second,
 - fetch that page with `Referer: https://thedaddy.li/`,
 - decode `window._econfig` → JSON → `stream_url`,
 - return that URL with `Referer: https://tossequip.net/` in headers.

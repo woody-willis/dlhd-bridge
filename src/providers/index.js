@@ -73,8 +73,15 @@ function noteProvider(provider) {
   counters.byProvider[provider] = (counters.byProvider[provider] ?? 0) + 1;
 }
 
+/** Failures that will not fix themselves within minutes. */
+const PERMANENT_REASONS = new Set(['provider-unsupported', 'turnstile-gated']);
+
+function isPermanent(err) {
+  return Boolean(err && PERMANENT_REASONS.has(err.reason));
+}
+
 function backoffMs(err, count) {
-  if (err && err.reason === 'provider-unsupported') return UNSUPPORTED_MS;
+  if (isPermanent(err)) return UNSUPPORTED_MS;
   return Math.min(FAILURE_BASE_MS * 2 ** Math.max(0, count - 1), FAILURE_MAX_MS);
 }
 
@@ -134,10 +141,11 @@ async function doResolve(id) {
   const primary = await tryTossequip(id, attempts);
   if (primary.result) return primary.result;
 
-  // The page named a player we cannot script (vertex.st, embedindia.st, …).
-  // The fallback only knows /player/ wideiptv ids, so trying it wastes 8s.
-  if (primary.error && primary.error.reason === 'provider-unsupported') {
-    throw new ResolveError('provider-unsupported', primary.error.message, {
+  // The page named a player we cannot script (vertex.st, embedindia.st, …) or
+  // one that now mints the URL behind Turnstile. The fallback only knows
+  // /player/ wideiptv ids, so trying it wastes 8s.
+  if (isPermanent(primary.error)) {
+    throw new ResolveError(primary.error.reason, primary.error.message, {
       attempts,
       host: primary.error.host,
     });
@@ -235,7 +243,7 @@ export function unplayableIds() {
   const now = Date.now();
   const ids = [];
   for (const [key, failure] of failures) {
-    if (failure.reason === 'provider-unsupported' && failure.until > now) ids.push(key);
+    if (PERMANENT_REASONS.has(failure.reason) && failure.until > now) ids.push(key);
   }
   ids.sort((a, b) => Number(a) - Number(b));
   return ids;

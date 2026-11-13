@@ -209,6 +209,62 @@ export function decodeEconfig(value) {
   throw new Error('no chunk permutation produced valid JSON');
 }
 
+/**
+ * The site embeds a player at `/e/<token>` on a host that rotates
+ * (tossequip.net -> waterera.net, ...). The token is the same across mirrors,
+ * so we ask the known ungated mirrors first and fall back to whatever host the
+ * page embedded.
+ */
+const MIRROR_HOSTS = Object.freeze(['tossequip.net']);
+
+const PLAYER_TOKEN_RE = /^https?:\/\/[^/?#]+\/e\/([A-Za-z0-9_-]{4,})\/?(?:[?#].*)?$/i;
+
+/** @param {string} value @returns {string} */
+function extractToken(value) {
+  const match = String(value ?? '').match(PLAYER_TOKEN_RE);
+  return match ? match[1] : '';
+}
+
+/**
+ * Fetch one `/e/<token>` page, trying the two browser UAs the host accepts.
+ *
+ * @param {string} url
+ * @param {number} id
+ * @returns {Promise<string>} page HTML
+ */
+async function fetchTokenPage(url, id) {
+  let lastError = null;
+  for (const userAgent of [TOKEN_UA, TOKEN_UA_ALT]) {
+    try {
+      const html = await fetchText(url, {
+        headers: {
+          Referer: REFERER,
+          Accept: 'text/html,application/xhtml+xml',
+          'user-agent': userAgent,
+        },
+        retries: 0,
+      });
+      if (!html || html.length < 200 || /<title>\s*Not allowed\s*<\/title>/i.test(html)) {
+        throw asResolveError('token-page', `token page rejected the request for id ${id}`, {
+          url,
+        });
+      }
+      return html;
+    } catch (err) {
+      lastError = err;
+      // A 403 here is usually a UA/rate rule; try the alternate browser UA.
+      if (err.status !== 403) break;
+      debug('tossequip: token page 403, retrying with alternate UA', { id });
+    }
+  }
+  if (lastError instanceof ResolveError) throw lastError;
+  throw asResolveError('http', `token page failed: ${lastError && lastError.message}`, {
+    cause: lastError,
+    status: lastError && lastError.status,
+    url,
+  });
+}
+
 function asResolveError(reason, message, opts) {
   return new ResolveError(reason, message, { provider: PROVIDER.TOSSEQUIP, ...opts });
 }
@@ -237,11 +293,11 @@ export async function resolve(id) {
   }
 
   const iframeSrcs = extractIframeSrc(castHtml);
-  let tokenUrl = iframeSrcs.find((src) => /tossequip\.net\/e\//i.test(src));
+  let tokenUrl = iframeSrcs.find((src) => PLAYER_TOKEN_RE.test(src));
   if (!tokenUrl) {
     // Tolerate markup that prints the URL outside an iframe tag.
-    const direct = castHtml.match(/https?:\/\/tossequip\.net\/e\/[A-Za-z0-9_-]+/i);
-    if (direct) tokenUrl = direct[0];
+    const direct = castHtml.match(/https?:\/\/[^\s"'<>]+\/e\/[A-Za-z0-9_-]{4,}/i);
+    if (direct) tokenUrl = direct[0].replace(/&amp;/gi, '&');
   }
   if (!tokenUrl) {
     // The site serves different players per id. If this page embeds a player
@@ -251,97 +307,123 @@ export async function resolve(id) {
     if (otherHost) {
       throw asResolveError(
         'provider-unsupported',
-        `id ${numericId} is served by ${otherHost}, not tossequip`,
+        `id ${numericId} is served by ${otherHost}, no scriptable /e/ player`,
         { url: castUrl, host: otherHost },
       );
     }
-    throw asResolveError('iframe-missing', `no tossequip iframe on /cast/stream-${numericId}.php`, {
+    throw asResolveError('iframe-missing', `no player iframe on /cast/stream-${numericId}.php`, {
       url: castUrl,
     });
   }
   if (tokenUrl.startsWith('//')) tokenUrl = `https:${tokenUrl}`;
 
-  let tokenHtml;
-  let lastTokenError;
-  for (const userAgent of [TOKEN_UA, TOKEN_UA_ALT]) {
+  const token = extractToken(tokenUrl);
+  if (!token) {
+    throw asResolveError('iframe-missing', `unrecognised player URL for id ${numericId}`, {
+      url: castUrl,
+    });
+  }
+
+  // Ask the ungated mirrors first, then whatever host the site embedded. A
+  // gated page is still worth one look: it identifies the reason precisely.
+  const candidates = MIRROR_HOSTS.map((host) => `https://${host}/e/${token}`);
+  if (!candidates.includes(tokenUrl)) candidates.push(tokenUrl);
+
+  /** @type {{reason:string, message:string, url:string, host?:string}|null} */
+  let gated = null;
+  /** @type {ResolveError|null} */
+  let lastError = null;
+
+  for (const candidate of candidates) {
+    let host = '';
     try {
-      tokenHtml = await fetchText(tokenUrl, {
-        headers: {
-          Referer: REFERER,
-          Accept: 'text/html,application/xhtml+xml',
-          'user-agent': userAgent,
-        },
-        retries: 0,
-      });
-      lastTokenError = null;
-      break;
-    } catch (err) {
-      lastTokenError = err;
-      // A 403 here is usually a UA/rate rule; try the alternate browser UA.
-      if (err.status !== 403) break;
-      debug('tossequip: token page 403, retrying with alternate UA', { id: numericId });
+      host = new URL(candidate).hostname.toLowerCase();
+    } catch {
+      continue;
     }
-  }
-  if (lastTokenError) {
-    throw asResolveError('http', `token page failed: ${lastTokenError.message}`, {
-      cause: lastTokenError,
-      status: lastTokenError.status,
-      url: tokenUrl,
+
+    let html;
+    try {
+      html = await fetchTokenPage(candidate, numericId);
+    } catch (err) {
+      lastError = err;
+      debug('tossequip: token host unavailable', { id: numericId, host, reason: err.reason });
+      continue;
+    }
+
+    const encoded = extractEconfig(html);
+    if (!encoded) {
+      lastError = asResolveError('config-missing', `no _econfig on ${host} for id ${numericId}`, {
+        url: candidate,
+      });
+      continue;
+    }
+
+    let decoded;
+    try {
+      decoded = decodeEconfig(encoded);
+    } catch (err) {
+      lastError = asResolveError(
+        err.code === 'NO_STREAM_URL' ? 'no-stream-url' : 'decode-failed',
+        `_econfig decode failed on ${host}: ${err.message}`,
+        { cause: err, url: candidate },
+      );
+      continue;
+    }
+
+    const cfg = decoded.json;
+    if (typeof cfg.stream_url === 'string' && cfg.stream_url.length > 0) {
+      let streamUrl;
+      try {
+        streamUrl = new URL(cfg.stream_url, candidate).toString();
+      } catch (err) {
+        lastError = asResolveError('no-stream-url', `invalid stream_url for id ${numericId}`, {
+          cause: err,
+          url: candidate,
+        });
+        continue;
+      }
+
+      const result = {
+        url: streamUrl,
+        headers: { Referer: `https://${host}/` },
+        ttlMs: TTL_MS,
+        provider: PROVIDER.TOSSEQUIP,
+      };
+
+      const meta = {};
+      if (typeof cfg.title === 'string' && cfg.title.trim()) meta.title = cfg.title.trim();
+      if (typeof cfg.logo === 'string' && cfg.logo.trim()) meta.logo = cfg.logo.trim();
+      if (Object.keys(meta).length > 0) result.meta = meta;
+
+      debug('tossequip: resolved via token host', { id: numericId, host });
+      return result;
+    }
+
+    // Present but gated: the plaintext config is gone and the page now mints
+    // the URL through a Turnstile-verified POST. Never retry these quickly.
+    if (cfg.turnstile_key || cfg.turnstile_hash) {
+      gated = {
+        reason: 'turnstile-gated',
+        message: `id ${numericId} is behind a Cloudflare Turnstile check on ${host}`,
+        url: candidate,
+        host,
+      };
+      continue;
+    }
+
+    lastError = asResolveError('no-stream-url', `no stream_url on ${host} for id ${numericId}`, {
+      url: candidate,
     });
   }
 
-  if (!tokenHtml || tokenHtml.length < 200 || /<title>\s*Not allowed\s*<\/title>/i.test(tokenHtml)) {
-    throw asResolveError('token-page', `token page rejected the request for id ${numericId}`, {
-      url: tokenUrl,
-    });
+  if (gated) {
+    throw asResolveError(gated.reason, gated.message, { url: gated.url, host: gated.host });
   }
-
-  const encoded = extractEconfig(tokenHtml);
-  if (!encoded) {
-    throw asResolveError('config-missing', `no _econfig in token page for id ${numericId}`, {
-      url: tokenUrl,
-    });
-  }
-
-  let decoded;
-  try {
-    decoded = decodeEconfig(encoded);
-  } catch (err) {
-    const reason = err.code === 'NO_STREAM_URL' ? 'no-stream-url' : 'decode-failed';
-    throw asResolveError(reason, `_econfig decode failed: ${err.message}`, {
-      cause: err,
-      url: tokenUrl,
-    });
-  }
-
-  const cfg = decoded.json;
-  if (typeof cfg.stream_url !== 'string' || cfg.stream_url.length === 0) {
-    throw asResolveError('no-stream-url', `no stream_url for id ${numericId}`, { url: tokenUrl });
-  }
-
-  let streamUrl;
-  try {
-    streamUrl = new URL(cfg.stream_url, tokenUrl).toString();
-  } catch (err) {
-    throw asResolveError('no-stream-url', `invalid stream_url for id ${numericId}`, {
-      cause: err,
-      url: tokenUrl,
-    });
-  }
-
-  const result = {
-    url: streamUrl,
-    headers: { Referer: PROVIDER_REFERER },
-    ttlMs: TTL_MS,
-    provider: PROVIDER.TOSSEQUIP,
-  };
-
-  const meta = {};
-  if (typeof cfg.title === 'string' && cfg.title.trim()) meta.title = cfg.title.trim();
-  if (typeof cfg.logo === 'string' && cfg.logo.trim()) meta.logo = cfg.logo.trim();
-  if (Object.keys(meta).length > 0) result.meta = meta;
-
-  return result;
+  if (lastError) throw lastError;
+  throw asResolveError('no-stream-url', `no usable player page for id ${numericId}`, {
+    url: castUrl,
+  });
 }
 
 export default { resolve, decodeEconfig, ResolveError };

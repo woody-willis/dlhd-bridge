@@ -221,17 +221,30 @@ Resolution happens lazily on the first `/stream/:id.m3u8` request and is cached.
 ### Providers: why `tossequip.net` and not `dembed.st`
 
 `thedaddy.li` rotates several player folders per channel. The bridge uses `/cast/`
-(player 2), which fronts **`tossequip.net`**:
+(player 2), which embeds a player at `https://<player-host>/e/<token>`. The player
+host rotates (`tossequip.net` → `waterera.net`, …), but the **token is the same
+across mirrors**, so the bridge asks the known ungated mirrors first:
 
-1. `GET /cast/stream-<id>.php` → an `<iframe src="https://tossequip.net/e/<token>">`.
+1. `GET /cast/stream-<id>.php` → an `<iframe src="https://waterera.net/e/<token>">`
+   (host varies; only the token is used).
 2. `GET https://tossequip.net/e/<token>` with `Referer: https://thedaddy.li/`.
 3. The page embeds `window._econfig` as base64; decoding it (split into 4 chunks,
    drop one character from each, reorder, base64-decode again, JSON-parse) yields
    `stream_url` — a plain HLS media playlist.
-4. Playlist and segments are fetched with `Referer: https://tossequip.net/`.
+4. Playlist and segments are fetched with the player origin as `Referer`
+   (`https://tossequip.net/`), and the CDN host is added to the segment allowlist.
 
 **No browser is required.** The token page is ordinary HTML and the stream URL is
 signed, not browser-bound.
+
+As of 2026-11-13 the `waterera.net` host serves the *same* token but replaces
+`stream_url` in `_econfig` with `turnstile_key` / `turnstile_hash`; it mints the
+manifest through `POST /turnstile/<id>` and only returns a URL if Cloudflare
+`siteverify` accepts the Turnstile response (`{"error":"Verification failed"}` for
+anything else — see `plan/PROVIDER-WATERERA.md`). The bridge never posts to that
+endpoint; it uses the still-open mirror instead. If the mirror disappears, ids fall
+back to `turnstile-gated`, are hidden from the playlist for an hour, and the outage
+guard stops hiding channels entirely once every recent resolve fails.
 
 The `dembed.st` / `edge.wedd48c.top` player (`/stream/`, `/watch/`, `/hub/`) is
 deliberately **not** used. Its edge returns `403 token required` for the manifest,
